@@ -1,9 +1,11 @@
 import keras.backend as K
 import keras
+import numpy as np
 from keras.layers import LSTM, Input
 
-AMIDOGEN = [A, R, N, D, C, Q, E, G, H, I, L, K, M, F, P, S, T, W, Y, V]
-
+AMINO = dict(zip(['A', 'R', 'N', 'D', 'C', 'Q', 'E', 'G', 'H', 'I', 'L', 'K', 'M', 'F', 'P', 'S', 'T', 'W', 'Y', 'V'], \
+                    [ x/10 for x in range(-10, 11) if x != 0]))
+SECSTR = dict(zip(['H', 'E', 'C'], [[1, 0, 0], [0, 1, 0], [1, 0, 0]]))
 def read_data(filename):
     feature, label = [], []
     with open(filename, "r") as f:
@@ -15,6 +17,18 @@ def read_data(filename):
             elif idx % 4 == 3:
                 label.append(val)
     return feature, label
+
+def build_feature_vector(feature):
+    vector = []
+    for amino in feature:
+        vector.append([AMINO[x] for x in amino])
+    return np.array(vector)
+
+def build_label_vetor(label):    
+    label = []
+    for secstr in label:
+        label.append([SECSTR[x] for x in secstr])
+    return np.array(label)
 
 def build_model():
     I = Input(shape=(None, 1)) # unknown timespan, fixed feature size
@@ -49,6 +63,8 @@ def build_model():
 
 def train(filename):
     feature, label = read_data(filename)
+    feature = build_feature_vector(feature)
+    label = build_label_vetor(label)
     print(feature[0])
     print(label[0])
 
