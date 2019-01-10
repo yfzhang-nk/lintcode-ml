@@ -118,6 +118,7 @@ def data_generator(data_x, data_y):
         x = np.array(p[0]).reshape(1, x_len, INPUT_SIZE)
         y = np.array(p[1]).reshape(1, x_len, OUTPUT_SIZE)
         yield (x, y)
+    yield None
 
 
 def train(filename):
@@ -125,7 +126,7 @@ def train(filename):
     x_in, y_in = preprocess_data(features, labels)
     m = build_model()
     m.fit_generator(
-        generator=train_generator(x_in, y_in), epochs=100, steps_per_epoch=len(x_in), batch_size=1,
+        generator=train_generator(x_in, y_in), epochs=100, steps_per_epoch=len(x_in),
         validation_data=valid_generator(x_in, y_in), validation_steps=10,
     )
 
