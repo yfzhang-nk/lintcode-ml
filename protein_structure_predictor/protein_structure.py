@@ -1,7 +1,9 @@
+# coding: utf-8
+import time
 import numpy as np
 from keras import models
 from keras.layers import LSTM, Dense, TimeDistributed
-from keras.optimizers import Adam
+# from keras.optimizers import Adam, SGD
 
 SCALE_MAX = 1.0
 AMIDOGEN = [
@@ -63,7 +65,7 @@ def preprocess_data(features, labels):
     for l in labels:
         embedding = np.zeros((label_size, len(l)), dtype=np.int8)
         for idx, s in enumerate(l):
-            embedding[SECSTR_MAPPING[s], idx] = 1
+            embedding[SECSTR_MAPPING[s], idx] = 1.0
         y.append(embedding)
     return x, y
 
@@ -74,28 +76,34 @@ def build_model():
         LSTM(
             32, return_sequences=True,
             input_shape=(None, 1),
-            # dropout=0.5, recurrent_dropout=0.5,
+            dropout=0.1, # recurrent_dropout=0.5,
+            # activity_regularizer=keras.regularizers.l1(0.2)
+        )
+    )
+    model.add(
+        LSTM(
+            32, return_sequences=True,
+            dropout=0.1, # recurrent_dropout=0.5,
             # activity_regularizer=keras.regularizers.l1(0.2)
         )
     )
     model.add(
         LSTM(
             16, return_sequences=True,
-            # dropout=0.5, recurrent_dropout=0.5,
+            dropout=0.1, # recurrent_dropout=0.5,
             # activity_regularizer=keras.regularizers.l1(0.2)
         )
     )
-    model.add(TimeDistributed(Dense(3, activation='softmax')))
+    model.add(TimeDistributed(Dense(OUTPUT_SIZE, activation='softmax')))
     # sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
-    adam = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
+    # adam = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
     model.compile(
-        optimizer=adam,
+        optimizer='adam',
         loss='categorical_crossentropy',
         metrics=['accuracy']
     )
     print(model.summary())
     return model
-
 
 
 def train_generator(x, y, split=0.1):
@@ -112,12 +120,13 @@ def valid_generator(x, y, split=0.1):
 
 def data_generator(data_x, data_y):
     pairs = [(x, data_y[i]) for i, x in enumerate(data_x)]
-    np.random.shuffle(pairs)
-    for p in pairs:
-        x_len = len(p[0])
-        x = np.array(p[0]).reshape(1, x_len, INPUT_SIZE)
-        y = np.array(p[1]).reshape(1, x_len, OUTPUT_SIZE)
-        yield (x, y)
+    while True:
+        np.random.shuffle(pairs)
+        for p in pairs:
+            x_len = len(p[0])
+            x = np.array(p[0]).reshape(1, x_len, INPUT_SIZE)
+            y = np.array(p[1]).reshape(1, x_len, OUTPUT_SIZE)
+            yield (x, y)
     yield None
 
 
@@ -126,9 +135,11 @@ def train(filename):
     x_in, y_in = preprocess_data(features, labels)
     m = build_model()
     m.fit_generator(
-        generator=train_generator(x_in, y_in), epochs=100, steps_per_epoch=len(x_in),
+        generator=train_generator(x_in, y_in), epochs=20, steps_per_epoch=int(len(x_in)*0.9),
         validation_data=valid_generator(x_in, y_in), validation_steps=10,
     )
+    m.save_weights('protein_weights.{}.h5'.format(int(time.time())))
+
 
 if __name__ == "__main__":
     train("ss100_train.txt")
