@@ -28,10 +28,8 @@ AMIDOGEN = [
     'Y',
     'V',
 ]
-AMIDOGEN_MAPPING = {}
 AMIDOGEN_SIZE = len(AMIDOGEN)
-for idx, g in enumerate(AMIDOGEN):
-    AMIDOGEN_MAPPING[g] = SCALE_MAX / AMIDOGEN_SIZE * (idx + 1)
+AMIDOGEN_MAPPING = dict(zip(AMIDOGEN, [SCALE_MAX / AMIDOGEN_SIZE * idx for idx in range(1, AMIDOGEN_SIZE+1)]))
 
 SECSTR = ['H', 'E', 'C']
 SECSTR_MAPPING = {
