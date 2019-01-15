@@ -1,8 +1,9 @@
 # coding: utf-8
-import time
+import os
 import numpy as np
 from keras import models
 from keras.layers import LSTM, Dense, TimeDistributed
+from keras.callbacks import ModelCheckpoint
 # from keras.optimizers import Adam, SGD
 
 SCALE_MAX = 1.0
@@ -40,6 +41,9 @@ SECSTR_MAPPING = {
 
 INPUT_SIZE = 1
 OUTPUT_SIZE = 3
+CHECKPOINT_DIR = './model_checkpoints'
+CHECKPOINT_FILE = 'weights.{epoch:02d}-{val_loss:.2f}.hdf5'
+CHECKPOINT_PATH = os.path.join(CHECKPOINT_DIR, CHECKPOINT_FILE)
 
 def read_data(filename):
     features, labels = [], []
@@ -104,18 +108,6 @@ def build_model():
     return model
 
 
-def train_generator(x, y, split=0.1):
-    split_index = int(len(x)*(1-split))
-    train_x, train_y = x[:split_index], y[:split_index]
-    return data_generator(train_x, train_y)
-
-
-def valid_generator(x, y, split=0.1):
-    split_index = int(len(x)*split)
-    valid_x, valid_y = x[split_index+1:], y[split_index+1:]
-    return data_generator(valid_x, valid_y)
-
-
 def data_generator(data_x, data_y):
     pairs = [(x, data_y[i]) for i, x in enumerate(data_x)]
     while True:
@@ -128,16 +120,45 @@ def data_generator(data_x, data_y):
     yield None
 
 
-def train(filename):
+def sample_test(filename):
+    # read data from file
     features, labels = read_data(filename)
+    # preprocess data to [features, labels]
     x_in, y_in = preprocess_data(features, labels)
+    print(x_in[0], y_in[0])
     m = build_model()
     m.fit_generator(
-        generator=train_generator(x_in, y_in), epochs=20, steps_per_epoch=int(len(x_in)*0.9),
-        validation_data=valid_generator(x_in, y_in), validation_steps=10,
+        generator=data_generator(x_in, y_in), epochs=1, steps_per_epoch=1,
+        validation_data=data_generator(x_in, y_in), validation_steps=1,
     )
-    m.save_weights('protein_weights.{}.h5'.format(int(time.time())))
+    x_len = len(x_in[-1])
+    test_x = np.array(x_in[-1]).reshape(1, x_len, INPUT_SIZE)
+    test_y = np.array(y_in[-1]).reshape(1, x_len, OUTPUT_SIZE)
+    print(m.predict(test_x), test_y)
+
+
+def train(filename, valid_split=0.1):
+    # read data from file
+    features, labels = read_data(filename)
+    # preprocess data to [features, labels]
+    x_in, y_in = preprocess_data(features, labels)
+    # generate train and validate data set
+    split_index = int(len(x_in)*(1-valid_split))
+    train_x_in, train_y_in = x_in[:split_index], y_in[:split_index]
+    valid_x_in, valid_y_in = x_in[split_index+1:], y_in[split_index+1:]
+    train_size = len(train_x_in)
+    valid_size = len(valid_x_in)
+    # build network model
+    m = build_model()
+    checkpoint_callback = ModelCheckpoint(CHECKPOINT_PATH)
+    # start training
+    m.fit_generator(
+        generator=data_generator(train_x_in, train_y_in), epochs=20, steps_per_epoch=train_size,
+        validation_data=data_generator(valid_x_in, valid_y_in), validation_steps=valid_size,
+        callbacks=[checkpoint_callback]
+    )
 
 
 if __name__ == "__main__":
     train("ss100_train.txt")
+    # sample_test('ss100_train.txt')
