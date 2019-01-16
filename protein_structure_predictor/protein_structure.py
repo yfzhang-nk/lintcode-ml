@@ -2,6 +2,7 @@
 import os
 import numpy as np
 from keras import models
+from keras.utils import to_categorical
 from keras.layers import LSTM, Dense, TimeDistributed
 from keras.callbacks import ModelCheckpoint
 # from keras.optimizers import Adam, SGD
@@ -65,10 +66,7 @@ def preprocess_data(features, labels):
         x.append(np.array([AMIDOGEN_MAPPING.get(s, 0.0) for s in f]))
     label_size = len(SECSTR)
     for l in labels:
-        embedding = np.zeros((label_size, len(l)), dtype=np.int8)
-        for idx, s in enumerate(l):
-            embedding[SECSTR_MAPPING[s], idx] = 1.0
-        y.append(embedding)
+        y.append(to_categorical([SECSTR_MAPPING[s] for s in l], num_classes=label_size))
     return x, y
 
 
@@ -155,7 +153,7 @@ def train(filename, valid_split=0.1):
     m.fit_generator(
         generator=data_generator(train_x_in, train_y_in), epochs=20, steps_per_epoch=train_size,
         validation_data=data_generator(valid_x_in, valid_y_in), validation_steps=valid_size,
-        callbacks=[checkpoint_callback]
+        callbacks=[checkpoint_callback],
     )
 
 
