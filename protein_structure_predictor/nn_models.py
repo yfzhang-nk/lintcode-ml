@@ -61,25 +61,19 @@ class BenchMarkModel(BaseModel):
     def _build_model(self):
         model = models.Sequential()
         model.add(
-            LSTM(
+            CuDNNLSTM(
                 32, return_sequences=True,
-                input_shape=(None, 1),
-                dropout=0.1,  # recurrent_dropout=0.5,
-                # activity_regularizer=keras.regularizers.l1(0.2)
+                input_shape=(None, 26),
             )
         )
         model.add(
-            LSTM(
+            CuDNNLSTM(
                 32, return_sequences=True,
-                dropout=0.1,  # recurrent_dropout=0.5,
-                # activity_regularizer=keras.regularizers.l1(0.2)
             )
         )
         model.add(
-            LSTM(
+            CuDNNLSTM(
                 16, return_sequences=True,
-                dropout=0.1,  # recurrent_dropout=0.5,
-                # activity_regularizer=keras.regularizers.l1(0.2)
             )
         )
         model.add(TimeDistributed(Dense(self._output_size, activation='softmax')))
@@ -100,8 +94,8 @@ class BenchMarkModel(BaseModel):
 
     def data_generator(self, data_x, data_y):
         pairs = [
-            ([xi / 30.0 for xi in x], to_categorical(
-                data_y[i], num_classes=self._output_size
+            ([self.one_hot(np.array(xi), self._input_size) for xi in self.amido2id(x, mask=False)], to_categorical(
+                self.sec2id(data_y[i], mask=False), num_classes=self._output_size
             )) for i, x in enumerate(data_x)
         ]
         while True:
@@ -110,7 +104,20 @@ class BenchMarkModel(BaseModel):
                 x_len = len(p[0])
                 x = np.array(p[0]).reshape(1, x_len, self._input_size)
                 y = np.array(p[1]).reshape(1, x_len, self._output_size)
+                y = y.astype(np.float32, copy=False)
                 yield (x, y)
+
+    def predict(self, x_input, y_output=None):
+        assert(self._model)
+        x_in = self.one_hot(np.array(self.amido2id(x_input, mask=False)), self._input_size)
+        x_in = np.array(x_in).reshape(1, len(x_input), self._input_size)
+        y_out = self._model.predict(x_in)
+        y_out = np.argmax(y_out[0, :, :], axis=-1)
+        print 'input x:', ''.join(x_input)
+        print 'predt y:', ''.join(self.id2sec(y_out, mask=False))
+        if y_output:
+            print 'truth y:', ''.join(y_output)
+        return y_out
 
 
 class BidirectionModel(BaseModel):

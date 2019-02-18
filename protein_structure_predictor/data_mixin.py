@@ -1,4 +1,5 @@
 # coding: utf-8
+import numpy as np
 
 class DataMixin(object):
     AMIDOGEN = [
@@ -48,3 +49,6 @@ class DataMixin(object):
         shift = shift - 1 if start_token else shift
         return [self.SECSTR[idx + shift] for idx in id_list]
 
+    def one_hot(self, targets, num_classes):
+        res = np.eye(num_classes)[np.array(targets).reshape(-1)]
+        return res.reshape(list(targets.shape)+[num_classes])

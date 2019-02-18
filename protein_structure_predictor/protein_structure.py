@@ -46,15 +46,15 @@ class Evaluate(Callback):
                 self._model.predict(x, self._valid_y[idx])
 
 
-def train(filename, m, init_epoch=None, valid_split=0.1, epochs=100):
+def train(filename, m, init_epoch=None, valid_split=0.01, epochs=100):
     # read data from file
     x_in, y_in = read_data(filename)
     # generate train and validate data set
     split_index = int(len(x_in)*(1-valid_split))
     train_x_in, train_y_in = x_in[:split_index], y_in[:split_index]
     valid_x_in, valid_y_in = x_in[split_index+1:], y_in[split_index+1:]
-    train_size = len(train_x_in) / 2
-    valid_size = len(valid_x_in) / 2
+    train_size = len(train_x_in)
+    valid_size = len(valid_x_in)
     train_model = m.build_train_model()
     evaluation_callback = Evaluate(m, x_in[-2:], y_in[-2:])
     checkpoint_callback = ModelCheckpoint(m.checkpoint_path())
@@ -92,7 +92,7 @@ def predict(in_file, m, init_epoch, out_file):
     m.load_model_weights(init_epoch=init_epoch, model=decoder_model)
     y_out = []
     for x in x_in:
-        y_out.extend(m.predict(x, encoder_model, decoder_model))
+        y_out.extend(m.predict(x))
     with open(out_file, 'w') as f:
         f.write('class\n')
         for y in y_out:
@@ -107,7 +107,7 @@ def predict_ex(in_file, m, init_epoch, out_file):
     m.load_model_weights(init_epoch=init_epoch, model=model)
     y_out = []
     for x in x_in:
-        y_out.extend(m.predict(x, model))
+        y_out.extend(m.predict(x))
     with open(out_file, 'w') as f:
         f.write('class\n')
         for y in y_out:
@@ -116,11 +116,11 @@ def predict_ex(in_file, m, init_epoch, out_file):
 
 
 if __name__ == "__main__":
-    # m = BenchMarkModel('benchmark')
+    m = BenchMarkModel('benchmark', input_size=26, output_size=3)
     # m = BidirectionModel('bidirection-2')
     # m = EncoderDecoderModel('encoder-decoder')
     # m = LatestEncoderDecoderModel('latest-encoder-decoder', maxlen=100)
-    m = AttentionEncoderDecoderModel('attention-encoder-decoder', maxlen=100)
-    train("ss100_train.txt", m, init_epoch=None)
+    # m = AttentionEncoderDecoderModel('attention-encoder-decoder', maxlen=100)
+    # train("ss100_train.txt", m, init_epoch=None)
     # sample_test('ss100_train.txt', m)
-    # predict('ss100_test.txt', m, 100, 'encoder-decoder_out.csv')
+    predict_ex('ss100_test.txt', m, 30, 'benchmark_out.csv')
