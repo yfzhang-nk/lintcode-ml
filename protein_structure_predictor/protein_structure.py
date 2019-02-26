@@ -1,15 +1,12 @@
 # coding: utf-8
-import numpy as np
 from keras.callbacks import ModelCheckpoint, Callback, TensorBoard
 
-from nn_models import (
-    BenchMarkModel, BidirectionModel, EncoderDecoderModel,
-    LatestEncoderDecoderModel, AttentionEncoderDecoderModel,
-)
+from nn_models import *
 
 
 INPUT_SIZE = 1
 OUTPUT_SIZE = 3
+
 
 def read_data(filename):
     features, labels = [], []
@@ -42,6 +39,8 @@ class Evaluate(Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         if hasattr(self._model, 'predict'):
+            if hasattr(self._model, 'load_weight_when_evaluation'):
+                self._model.load_weight_when_evaluation(epoch)
             for idx, x in enumerate(self._valid_x):
                 self._model.predict(x, self._valid_y[idx])
 
@@ -116,11 +115,19 @@ def predict_ex(in_file, m, init_epoch, out_file):
 
 
 if __name__ == "__main__":
-    m = BenchMarkModel('benchmark', input_size=26, output_size=3)
-    # m = BidirectionModel('bidirection-2')
-    # m = EncoderDecoderModel('encoder-decoder')
-    # m = LatestEncoderDecoderModel('latest-encoder-decoder', maxlen=100)
+    # m = BenchMarkModel('benchmark', input_size=26, output_size=3)
+    # predict_ex('ss100_test.txt', m, 30, 'benchmark_out.csv')
+
+    # m = BidirectionModel('bidirection', input_size=26, output_size=3)
+    # predict_ex('ss100_test.txt', m, 20, 'bidirection_out.csv')
+
+    # m = Seq2SeqModel('seq2seq', input_size=26, output_size=3)
+    # predict('ss100_test.txt', m, 100, 'encoder-decoder_out.csv')
+
+    m = EncoderDecoderModel('encoder-decoder', input_size=26, output_size=3, maxlen=100)
+    predict_ex('ss100_test.txt', m, 99, 'encoder-decoder_out.csv')
+
     # m = AttentionEncoderDecoderModel('attention-encoder-decoder', maxlen=100)
     # train("ss100_train.txt", m, init_epoch=None)
     # sample_test('ss100_train.txt', m)
-    predict_ex('ss100_test.txt', m, 30, 'benchmark_out.csv')
+    # predict_ex('ss100_test.txt', m, 30, 'benchmark_out.csv')

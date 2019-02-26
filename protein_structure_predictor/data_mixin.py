@@ -31,14 +31,15 @@ class DataMixin(object):
     SECSTR = ['H', 'E', 'C']
     START_TOKEN = 1
 
-    def amido2id(self, slist, mask=True):
-        return [self.AMIDOGEN.index(s) + 1 if mask else self.AMIDOGEN.index(s) for s in slist]
+    def amido2id(self, slist, mask=True, reverse=False):
+        amido_list = reversed(slist) if reverse else slist
+        return [self.AMIDOGEN.index(s) + 1 if mask else self.AMIDOGEN.index(s) for s in amido_list]
 
     def sec2id(self, slist, mask=True, start_token=False):
         shift = 1 if start_token else 0
         shift = shift + 1 if mask else shift
         org_list = [self.SECSTR.index(s) + shift for s in slist]
-        return [self.START_TOKEN] + org_list if start_token else org_list
+        return [self.START_TOKEN if mask else self.START_TOKEN - 1] + org_list if start_token else org_list
 
     def id2amido(self, id_list, mask=True):
         shift = -1 if mask else 0
