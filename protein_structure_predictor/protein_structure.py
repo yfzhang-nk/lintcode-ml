@@ -124,10 +124,12 @@ if __name__ == "__main__":
     # m = Seq2SeqModel('seq2seq', input_size=26, output_size=3)
     # predict('ss100_test.txt', m, 100, 'encoder-decoder_out.csv')
 
-    m = EncoderDecoderModel('encoder-decoder', input_size=26, output_size=3, maxlen=100)
-    predict_ex('ss100_test.txt', m, 99, 'encoder-decoder_out.csv')
+    # m = EncoderDecoderModel('encoder-decoder', input_size=26, output_size=3, maxlen=100)
+    # predict_ex('ss100_test.txt', m, 99, 'encoder-decoder_out.csv')
 
-    # m = AttentionEncoderDecoderModel('attention-encoder-decoder', maxlen=100)
+    m = AttentionEncoderDecoderModel('attention-encoder-decoder', input_size=26, output_size=3, maxlen=100)
+    predict_ex('ss100_test.txt', m, 100, 'attention-encoder-decoder_out.csv')
+
     # train("ss100_train.txt", m, init_epoch=None)
     # sample_test('ss100_train.txt', m)
     # predict_ex('ss100_test.txt', m, 30, 'benchmark_out.csv')
