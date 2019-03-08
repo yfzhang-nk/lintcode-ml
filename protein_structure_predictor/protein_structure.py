@@ -127,8 +127,11 @@ if __name__ == "__main__":
     # m = EncoderDecoderModel('encoder-decoder', input_size=26, output_size=3, maxlen=100)
     # predict_ex('ss100_test.txt', m, 99, 'encoder-decoder_out.csv')
 
-    m = AttentionEncoderDecoderModel('attention-encoder-decoder', input_size=26, output_size=3, maxlen=100)
-    predict_ex('ss100_test.txt', m, 100, 'attention-encoder-decoder_out.csv')
+    m = AttentionEncoderDecoderModel('more-attention-encoder-decoder', input_size=26, output_size=3, maxlen=100)
+    predict_ex('ss100_test.txt', m, 18, 'more-attention-encoder-decoder_out.csv')
+
+    # m = AttentionGRUModel('attention-gru', input_size=26, output_size=3, maxlen=100)
+    # predict_ex('ss100_test.txt', m, 62, 'attention-gru_out.csv')
 
     # train("ss100_train.txt", m, init_epoch=None)
     # sample_test('ss100_train.txt', m)

@@ -4,7 +4,8 @@ import numpy as np
 from keras import models
 from keras.layers import (
     Input, LSTM, Dense, TimeDistributed, Bidirectional, CuDNNLSTM, Embedding, RepeatVector,
-    Lambda, Permute, multiply, concatenate, Masking, add, Activation,
+    Lambda, Permute, multiply, concatenate, Masking, add, Activation, LSTMCell, RNN, CuDNNGRU,
+    GRUCell, GRU,
 )
 from keras.utils import to_categorical
 from keras.preprocessing.sequence import pad_sequences
@@ -12,6 +13,7 @@ from keras import backend as K
 # from keras.optimizers import Adam, SGD
 
 from data_mixin import DataMixin
+from recurrent_attention import DenseAnnotationAttention
 
 
 class BaseModel(DataMixin):
@@ -387,24 +389,65 @@ class EncoderDecoderModel(BaseModel):
 class AttentionEncoderDecoderModel(EncoderDecoderModel):
     """refer to: https://github.com/philipperemy/keras-attention-mechanism/blob/master/attention_lstm.py
     """
-    # def __init__(self, *args, **kwargs):
-    #     self._maxlen = kwargs.pop('maxlen')
-    #     super(AttentionEncoderDecoderModel, self).__init__(*args, **kwargs)
 
-    def attention_3d_block(self, inputs, single_attention_vector=True):
+    def attention_3d_block(self, inputs, single_attention_vector=True, name=''):
     	# inputs.shape = (batch_size, time_steps, input_dim)
     	input_dim = int(inputs.shape[2])
         timestep_dim = int(inputs.shape[1])
     	a = Permute((2, 1))(inputs)
-    	a = Dense(timestep_dim, name='attention_dense', activation='softmax')(a)
+    	a = Dense(timestep_dim, name='{}_attention_dense'.format(name), activation='softmax')(a)
     	if single_attention_vector:
             # 共享单一attention向量
             # 此时axis=1为input_dim维度
-    	    a = Lambda(lambda x: K.mean(x, axis=1), name='dim_reduction')(a)
+    	    a = Lambda(lambda x: K.mean(x, axis=1), name='{}_dim_reduction'.format(name))(a)
     	    a = RepeatVector(input_dim)(a)
-    	a_probs = Permute((2, 1), name='attention_vec')(a)
-    	output_attention_mul = multiply([inputs, a_probs], name='attention_mul')
+    	a_probs = Permute((2, 1), name='{}_attention_vec'.format(name))(a)
+    	output_attention_mul = multiply([inputs, a_probs], name='{}_attention_mul'.format(name))
         return output_attention_mul
+
+    def build_train_model(self):
+        latent_dim = 64
+        target_class_number = self._output_size + 1  # 包含mark，总共4个类别
+        encoder_input = Input(shape=(self._maxlen, self._input_size + 1))
+        encoder = Bidirectional(CuDNNLSTM(
+            latent_dim, return_sequences=True, name='encoder_lstm_1'
+        ))(encoder_input)
+        encoder_output = Bidirectional(CuDNNLSTM(
+            latent_dim, return_sequences=True, name='encoder_lstm_2'
+        ))(encoder)
+        # encoder attention after LSTM
+        encoder_attention = self.attention_3d_block(
+            encoder_output, single_attention_vector=True, name='encoder_attention',
+        )
+        decoder_output = CuDNNLSTM(
+            latent_dim, return_sequences=True, name='decoder_lstm_1'
+        )(concatenate([encoder_input, encoder_attention]))
+        decoder_attention = self.attention_3d_block(
+            decoder_output, single_attention_vector=True, name='decoder_attention',
+        )
+        final_output = TimeDistributed(
+            Dense(target_class_number, activation='softmax', name='decoder_softmax')
+        )(concatenate([encoder_input, encoder_attention, decoder_output, decoder_attention]))
+        model = models.Model(encoder_input, final_output)
+        model.compile(
+            optimizer='adam',
+            loss='categorical_crossentropy',
+            metrics=['accuracy']
+        )
+        model.summary()
+        self._model = model
+        return model
+
+    def build_predict_model(self):
+        return self.build_train_model()
+
+
+class AttentionGRUModel(EncoderDecoderModel):
+    """
+       refer to:
+         https://guillaumegenthial.github.io/sequence-to-sequence.html
+         https://github.com/keras-team/keras/blob/7cc25bec619073735b72e6499028fa14e8ea99a6/examples/recurrent_attention_machine_translation.py
+    """
 
     # def build_train_model(self):
     #     latent_dim = 64
@@ -441,25 +484,30 @@ class AttentionEncoderDecoderModel(EncoderDecoderModel):
 
     def build_train_model(self):
         latent_dim = 64
-        target_class_number = self._output_size + 1  # 包含mark，总共4个类别
-        encoder_input = Input(shape=(self._maxlen, self._input_size + 1))
-        encoder = Bidirectional(CuDNNLSTM(
-            latent_dim / 2, return_sequences=True, name='encoder_lstm_1'
-        ))(encoder_input)
-        encoder_output = Bidirectional(CuDNNLSTM(
-            latent_dim / 2, return_sequences=True, name='encoder_lstm_2'
-        ))(encoder)
-        # encoder attention after LSTM
-        attention_output = self.attention_3d_block(
-            encoder_output, single_attention_vector=True
-        )
-        decoder_output = CuDNNLSTM(
-            latent_dim, return_sequences=True, name='decoder_lstm_1'
-        )(attention_output)
-        final_output = TimeDistributed(
+        target_class_number = self._output_size + 1  # 包含start, 总共4个类别
+        x = Input(shape=(None, self._input_size))
+        x_enc, h_enc_fwd_final, h_enc_bkw_final = Bidirectional(GRU(
+            latent_dim, return_sequences=True, return_state=True, name='encoder_gru_1',
+            dropout=0.1, recurrent_dropout=0.1,
+        ))(x)
+
+        u = TimeDistributed(Dense(latent_dim, use_bias=False))(x_enc)
+        y = Input(shape=(None, target_class_number))
+        initial_state_gru = Dense(latent_dim, activation='tanh')(h_enc_bkw_final)
+        initial_attention_h = Lambda(lambda _x: K.zeros_like(_x)[:, 0, :])(x_enc)
+        initial_state = [initial_state_gru, initial_attention_h]
+        h1 = RNN(
+            cell=DenseAnnotationAttention(
+                cell=GRUCell(latent_dim, dropout=0.1, recurrent_dropout=0.1),
+                input_mode='concatenate',
+                output_mode='cell_output',
+            ),
+            return_sequences=True, name='decoder_gru_1',
+        )(y, initial_state=initial_state, constants=[x_enc, u])
+        y_pred = TimeDistributed(
             Dense(target_class_number, activation='softmax', name='decoder_softmax')
-        )(decoder_output)
-        model = models.Model(encoder_input, final_output)
+        )(concatenate([h1, y]))
+        model = models.Model([x, y], y_pred)
         model.compile(
             optimizer='adam',
             loss='categorical_crossentropy',
@@ -472,45 +520,81 @@ class AttentionEncoderDecoderModel(EncoderDecoderModel):
     def build_predict_model(self):
         return self.build_train_model()
 
-    # def data_generator(self, data_x, data_y):
-    #     target_class_number = self._output_size + 2  # mask: 0, start: 1
-    #     x_in = [np.array(self.amido2id(x)) for x in data_x]
-    #     x_in = [self.one_hot(x, self._input_size + 1) for x in x_in]
-    #     x_in = pad_sequences(x_in, maxlen=self._maxlen, padding='post', value=0) # padding x_in
-    #     y_in = [self.sec2id(y, start_token=True) for y in data_y]
-    #     y_in = [to_categorical(self.sec2id(y, start_token=True), num_classes=target_class_number) for y in data_y]
-    #     y_in = pad_sequences(y_in, maxlen=self._maxlen + 1, padding='post', value=0.0) # padding y_out
-    #     y_in = y_in.astype(np.float32, copy=False)
-    #     pairs = [
-    #         (x, y_in[i]) for i, x in enumerate(x_in)
-    #     ]
-    #     while True:
-    #         np.random.shuffle(pairs)
-    #         for p in pairs:
-    #             x = np.array(p[0]).reshape(1, self._maxlen, self._input_size + 1)
-    #             y_i = np.array(p[1]).reshape(1, self._maxlen + 1, target_class_number)
-    #             yield [x, y_i[:, :-1]], y_i[:, 1:, :]
+    def data_generator(self, data_x, data_y):
+        target_class_number = self._output_size + 1  # mask: 0, start: 1
+        x_in = [self.one_hot(np.array(self.amido2id(x, mask=False)), self._input_size) for x in data_x]
+        y_in = [to_categorical(self.sec2id(y, mask=False, start_token=True), num_classes=target_class_number) for y in data_y]
+        pairs = [
+            (x, y_in[i]) for i, x in enumerate(x_in)
+        ]
+        while True:
+            np.random.shuffle(pairs)
+	    for p in pairs:
+		l = len(p[0])
+                x = np.array(p[0]).reshape(1, l, self._input_size).astype(np.float32, copy=False)
+                y = np.array(p[1]).reshape(1, l + 1, target_class_number).astype(np.float32, copy=False)
+                yield [x, y[:, :-1]], y[:, 1:, :]
 
-    # def predict(self, x_input, y_output=None):
-    #     assert(self._model)
-    #     target_class_number = self._output_size + 2  # mask: 0, start: 1
-    #     x_len = len(x_input)
-    #     x_in = self.one_hot(np.array(self.amido2id(x_input)), self._input_size + 1)
-    #     padding_x = pad_sequences(
-    #         [x_in], maxlen=self._maxlen, padding='post', value=0
-    #     ).reshape(1, self._maxlen, self._input_size + 1)
-    #     # encode the input as state vectors.
-    #     y_in = [self.START_TOKEN]
-    #     while len(y_in) < x_len + 1:
-    #         padding_y = np.array(
-    #             to_categorical(y_in + [0] * (self._maxlen - len(y_in)), num_classes=target_class_number)
-    #         ).reshape(1, self._maxlen, target_class_number)
-    #         y_out = self._model.predict([padding_x, padding_y])
-    #         idx = np.argmax(y_out[0, len(y_in) - 1, 2:])  # 忽略mask和start
-    #         y_in.append(idx)
-    #     print 'input x:', ''.join(x_input)
-    #     print 'predt y:', ''.join(self.id2sec(y_in[1:], start_token=True))
-    #     if y_output:
-    #         print 'truth y:', ''.join(y_output)
-    #         assert(len(y_in) - 1 == len(y_output))
-    #     return y_in[1:]  # remove start_token
+    def _vanilla_predict(self, x_input):
+        assert(self._model)
+        target_class_number = self._output_size + 1  # start: 1
+        x_len = len(x_input)
+        x_in = self.one_hot(np.array(self.amido2id(x_input, mask=False)), self._input_size)
+        padding_x = x_in.reshape(1, x_len, self._input_size).astype(np.float32, copy=False)
+        # encode the input as state vectors.
+        y_in = [self.START_TOKEN-1]
+        while len(y_in) < x_len + 1:
+            padding_y = np.array(
+                to_categorical(y_in, num_classes=target_class_number)
+            ).reshape(1, len(y_in), target_class_number).astype(np.float32, copy=False)
+            y_out = self._model.predict([padding_x, padding_y])
+            # y_in = np.concatenate((np.array([self.START_TOKEN-1]), np.argmax(y_out[0, :, :], axis=-1)), axis=None)
+            idx = np.argmax(y_out[0, -1, :])  # 忽略mask和start
+            y_in.append(idx)
+        return y_in[1:]
+
+    def _beam_search(self, x_input, topk=3):
+        target_class_number = self._output_size + 1
+        scores = [0] * topk
+        yid = np.array([[self.START_TOKEN-1]] * topk)
+        xid = np.array([self.one_hot(np.array(self.amido2id(x_input, mask=False)), self._input_size)] * topk)
+        xid = xid.reshape(topk, len(x_input), self._input_size)
+        for i in range(len(x_input)):
+            y = np.array(
+                to_categorical(yid, num_classes=target_class_number)
+            ).reshape(topk, yid.shape[1], target_class_number).astype(np.float32, copy=False)
+            t = self._model.predict([xid, y])
+            proba = t[:, i, 1:]  # ignore start token
+            log_proba = np.log(proba + 1e-8)
+            arg_topk = log_proba.argsort(axis=1)[:, -topk:]
+            _yid = []  # 暂存的候选目标序列
+            _scores = []  # 暂存的候选目标序列得分
+            if i == 0:
+                for j in range(topk):
+                    _yid.append(list(yid[j]) + [arg_topk[0][j]])  # topk组数据相同，取第1组数据即可
+                    _scores.append(scores[j] + log_proba[0][arg_topk[0][j]])
+            else:
+                for j in range(len(xid)):
+                    for k in range(topk):
+                        _yid.append(list(yid[j]) + [arg_topk[j][k]])
+                        _scores.append(scores[j] + log_proba[j][arg_topk[j][k]])
+                _arg_topk = np.argsort(_scores)[-topk:]  # 从中选出新的topk
+                _yid = [_yid[k] for k in _arg_topk]
+                _scores = [_scores[k] for k in _arg_topk]
+            yid = np.array([_yid[k] for k in range(len(xid))])
+            scores = [_scores[k] for k in range(len(xid))]
+        return yid[np.argmax(scores)][1:] # remove start token
+
+    def predict(self, x_input, y_output=None):
+        greedy_y_pred = self._vanilla_predict(x_input)
+        beam_y_pred = self._beam_search(x_input)
+        print 'input x:'
+        print ''.join(x_input)
+        print 'greedy predt y:'
+        print ''.join(self.id2sec(greedy_y_pred, mask=False, start_token=True))
+        print 'beam search predt y:'
+        print ''.join(self.id2sec(beam_y_pred, mask=False, start_token=True))
+        if y_output:
+            print 'truth y:'
+            print ''.join(y_output)
+        return np.array(greedy_y_pred) - 1
